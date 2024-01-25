@@ -289,6 +289,8 @@ StorageURLSource::StorageURLSource(
             if (current_uri_options.empty())
                 return false;
 
+            LOG_DEBUG(getLogger("StorageURLSource"), "current_uri_options size: {}", current_uri_options.size());
+
             auto first_option = current_uri_options.cbegin();
             uri_and_buf = getFirstAvailableURIAndReadBuffer(
                 first_option,

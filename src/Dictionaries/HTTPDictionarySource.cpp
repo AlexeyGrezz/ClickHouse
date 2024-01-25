@@ -99,7 +99,8 @@ QueryPipeline HTTPDictionarySource::loadAll()
         DBMS_DEFAULT_BUFFER_SIZE,
         context->getReadSettings(),
         configuration.header_entries,
-        nullptr, false);
+        nullptr,
+        false);
 
     return createWrappedBuffer(std::move(in_ptr));
 }

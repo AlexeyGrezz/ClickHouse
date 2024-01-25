@@ -275,7 +275,7 @@ namespace Net
         /// This method should only be called if the request contains
         /// a "Expect: 100-continue" header.
 
-        void flushRequest();
+        virtual void flushRequest();
         /// Flushes the request stream.
         ///
         /// Normally this method does not need to be called.
@@ -283,7 +283,7 @@ namespace Net
         /// fully sent if receiveResponse() is not called, e.g.,
         /// because the underlying socket will be detached.
 
-        void reset();
+        virtual void reset();
         /// Resets the session and closes the socket.
         ///
         /// The next request will initiate a new connection,
@@ -302,6 +302,9 @@ namespace Net
         bool bypassProxy() const;
         /// Returns true if the proxy should be bypassed
         /// for the current host.
+
+        const Poco::Timestamp & getLastRequest() const;
+        /// Returns time when connection has been used last time
 
     protected:
         enum
@@ -322,11 +325,6 @@ namespace Net
         virtual bool mustReconnect() const;
         /// Checks if we can reuse a persistent connection.
 
-        const Poco::Timestamp & getLastRequest() const;
-        /// Returns time when connection has been used last time
-
-        void setLastRequest(Poco::Timestamp time);
-
         virtual void proxyAuthenticate(HTTPRequest & request);
         /// Sets the proxy credentials (Proxy-Authorization header), if
         /// proxy username and password have been set.
@@ -342,6 +340,8 @@ namespace Net
         void proxyTunnel();
         /// Calls proxyConnect() and attaches the resulting StreamSocket
         /// to the HTTPClientSession.
+
+        void setLastRequest(Poco::Timestamp time);
 
         HTTPSessionFactory _proxySessionFactory;
         /// Factory to create HTTPClientSession to proxy.

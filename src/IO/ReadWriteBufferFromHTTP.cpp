@@ -27,6 +27,8 @@ UpdatableSession<TSessionFactory>::UpdatableSession(const Poco::URI & uri, UInt6
     , initial_uri(uri)
     , session_factory(std::move(session_factory_))
 {
+    LOG_TEST(getLogger("UpdatableSession"), "ctor {}", uri.toString());
+
     session = session_factory->buildNewSession(uri);
 }
 
@@ -36,6 +38,8 @@ typename UpdatableSession<TSessionFactory>::SessionPtr UpdatableSession<TSession
 template <typename TSessionFactory>
 void UpdatableSession<TSessionFactory>::updateSession(const Poco::URI & uri)
 {
+    LOG_TEST(getLogger("UpdatableSession"), "updateSession {}", uri.toString());
+
     ++redirects;
     if (redirects <= max_redirects)
         session = session_factory->buildNewSession(uri);
@@ -51,12 +55,16 @@ void UpdatableSession<TSessionFactory>::updateSession(const Poco::URI & uri)
 template <typename TSessionFactory>
 typename UpdatableSession<TSessionFactory>::SessionPtr UpdatableSession<TSessionFactory>::createDetachedSession(const Poco::URI & uri)
 {
+    LOG_TEST(getLogger("UpdatableSession"), "createDetachedSession {}", uri.toString());
+
     return session_factory->buildNewSession(uri);
 }
 
 template <typename TSessionFactory>
 std::shared_ptr<UpdatableSession<TSessionFactory>> UpdatableSession<TSessionFactory>::clone(const Poco::URI & uri)
 {
+    LOG_TEST(getLogger("UpdatableSession"), "clone {}", uri.toString());
+
     return std::make_shared<UpdatableSession<TSessionFactory>>(uri, max_redirects, session_factory);
 }
 
@@ -151,7 +159,7 @@ std::istream * ReadWriteBufferFromHTTPBase<UpdatableSessionPtr>::callImpl(
     Poco::Net::HTTPRequest request(method_, uri_.getPathAndQuery(), Poco::Net::HTTPRequest::HTTP_1_1);
     prepareRequest(request, uri_, range);
 
-    LOG_TRACE(log, "Sending request to {}", uri_.toString());
+    LOG_TEST(log, "Sending request {} to {}", method_, uri_.toString());
 
     auto sess = current_session->getSession();
     auto & stream_out = sess->sendRequest(request);
@@ -161,6 +169,15 @@ std::istream * ReadWriteBufferFromHTTPBase<UpdatableSessionPtr>::callImpl(
 
     auto result_istr = receiveResponse(*sess, request, response, true);
     response.getCookies(cookies);
+    for (const auto & cookie: cookies)
+    {
+        LOG_TEST(log, "cookie : {}", cookie.toString());
+    }
+    for (const auto & header: response)
+    {
+        LOG_TEST(log, "header : {} - {}", header.first, header.second);
+    }
+    LOG_TEST(log, "receivedResponse : {}", method_);
 
     /// we can fetch object info while the request is being processed
     /// and we don't want to override any context used by it
@@ -173,6 +190,8 @@ std::istream * ReadWriteBufferFromHTTPBase<UpdatableSessionPtr>::callImpl(
 template <typename UpdatableSessionPtr>
 size_t ReadWriteBufferFromHTTPBase<UpdatableSessionPtr>::getFileSize()
 {
+    LOG_TRACE(log, "getFileSize {}", uri.toString());
+
     if (!file_info)
         file_info = getFileInfo();
 
@@ -290,6 +309,8 @@ ReadWriteBufferFromHTTPBase<UpdatableSessionPtr>::ReadWriteBufferFromHTTPBase(
     {
         http_header_entries.emplace_back("User-Agent", fmt::format("ClickHouse/{}", VERSION_STRING));
     }
+
+    LOG_TEST(log, "delay_initialization: {}", delay_initialization);
 
     if (!delay_initialization)
     {
@@ -449,7 +470,7 @@ bool ReadWriteBufferFromHTTPBase<UpdatableSessionPtr>::nextImpl()
         (file_info && file_info->file_size && getOffset() >= file_info->file_size.value()))
     {
         /// Response was fully read.
-        markSessionForReuse(session->getSession());
+        /// setReuseTag(*session->getSession());
         ProfileEvents::increment(ProfileEvents::ReadWriteBufferFromHTTPPreservedSessions);
         return false;
     }
@@ -576,7 +597,7 @@ bool ReadWriteBufferFromHTTPBase<UpdatableSessionPtr>::nextImpl()
     if (!result)
     {
         /// Eof is reached, i.e response was fully read.
-        markSessionForReuse(session->getSession());
+        //markSessionForReuse(session->getSession());
         ProfileEvents::increment(ProfileEvents::ReadWriteBufferFromHTTPPreservedSessions);
         return false;
     }
@@ -633,7 +654,7 @@ size_t ReadWriteBufferFromHTTPBase<UpdatableSessionPtr>::readBigAt(char * to, si
             {
                 result_istr->ignore(UINT64_MAX);
                 /// Response was fully read.
-                markSessionForReuse(*sess);
+                //markSessionForReuse(*sess);
                 ProfileEvents::increment(ProfileEvents::ReadWriteBufferFromHTTPPreservedSessions);
             }
         }
@@ -910,37 +931,7 @@ ReadWriteBufferFromHTTP::ReadWriteBufferFromHTTP(
         proxy_config_) {}
 
 
-PooledSessionFactory::PooledSessionFactory(
-    const ConnectionTimeouts & timeouts_, size_t per_endpoint_pool_size_)
-    : timeouts(timeouts_)
-    , per_endpoint_pool_size(per_endpoint_pool_size_) {}
-
-PooledSessionFactory::SessionType PooledSessionFactory::buildNewSession(const Poco::URI & uri)
-{
-    return makePooledHTTPSession(uri, timeouts, per_endpoint_pool_size);
-}
-
-
-PooledReadWriteBufferFromHTTP::PooledReadWriteBufferFromHTTP(
-    Poco::URI uri_,
-    const std::string & method_,
-    OutStreamCallback out_stream_callback_,
-    const Poco::Net::HTTPBasicCredentials & credentials_,
-    size_t buffer_size_,
-    const UInt64 max_redirects,
-    PooledSessionFactoryPtr session_factory)
-    : Parent(
-        std::make_shared<SessionType>(uri_, max_redirects, session_factory),
-        uri_,
-        credentials_,
-        method_,
-        out_stream_callback_,
-        buffer_size_) {}
-
-
 template class UpdatableSession<SessionFactory>;
-template class UpdatableSession<PooledSessionFactory>;
 template class detail::ReadWriteBufferFromHTTPBase<std::shared_ptr<UpdatableSession<SessionFactory>>>;
-template class detail::ReadWriteBufferFromHTTPBase<std::shared_ptr<UpdatableSession<PooledSessionFactory>>>;
 
 }

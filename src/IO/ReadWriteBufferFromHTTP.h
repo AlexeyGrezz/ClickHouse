@@ -88,6 +88,7 @@ namespace detail
         std::unique_ptr<ReadBuffer> impl;
         std::function<void(std::ostream &)> out_stream_callback;
         const Poco::Net::HTTPBasicCredentials & credentials;
+
         std::vector<Poco::Net::HTTPCookie> cookies;
         HTTPHeaderEntries http_header_entries;
         const RemoteHostFilter * remote_host_filter = nullptr;
@@ -249,44 +250,8 @@ public:
         ProxyConfiguration proxy_config_ = {});
 };
 
-class PooledSessionFactory
-{
-public:
-    explicit PooledSessionFactory(
-        const ConnectionTimeouts & timeouts_, size_t per_endpoint_pool_size_);
-
-    using SessionType = PooledHTTPSessionPtr;
-
-    /// Thread safe.
-    SessionType buildNewSession(const Poco::URI & uri);
-
-private:
-    ConnectionTimeouts timeouts;
-    size_t per_endpoint_pool_size;
-};
-
-using PooledSessionFactoryPtr = std::shared_ptr<PooledSessionFactory>;
-
-class PooledReadWriteBufferFromHTTP : public detail::ReadWriteBufferFromHTTPBase<std::shared_ptr<UpdatableSession<PooledSessionFactory>>>
-{
-    using SessionType = UpdatableSession<PooledSessionFactory>;
-    using Parent = detail::ReadWriteBufferFromHTTPBase<std::shared_ptr<SessionType>>;
-
-public:
-    explicit PooledReadWriteBufferFromHTTP(
-        Poco::URI uri_,
-        const std::string & method_,
-        OutStreamCallback out_stream_callback_,
-        const Poco::Net::HTTPBasicCredentials & credentials_,
-        size_t buffer_size_,
-        const UInt64 max_redirects,
-        PooledSessionFactoryPtr session_factory);
-};
-
 
 extern template class UpdatableSession<SessionFactory>;
-extern template class UpdatableSession<PooledSessionFactory>;
 extern template class detail::ReadWriteBufferFromHTTPBase<std::shared_ptr<UpdatableSession<SessionFactory>>>;
-extern template class detail::ReadWriteBufferFromHTTPBase<std::shared_ptr<UpdatableSession<PooledSessionFactory>>>;
 
 }
