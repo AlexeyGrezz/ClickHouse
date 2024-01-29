@@ -1,28 +1,18 @@
 #!/usr/bin/env python3
 
-import argparse
+from pathlib import Path
+import subprocess
+import sys
+from typing import List, Sequence, Tuple
 import csv
 import logging
 from pathlib import Path
-from typing import List, Optional, Tuple
+from typing import List, Tuple
 
-# isort: off
-from github import Github
-
-# isort: on
-
-from commit_status_helper import get_commit, post_commit_status
-from get_robot_token import get_best_robot_token
-from pr_info import PRInfo
-from report import ERROR, SUCCESS, TestResult, TestResults
-from s3_helper import S3Helper
-from upload_result_helper import upload_results
-
-
-def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser()
-    parser.add_argument("files", nargs="+", type=Path, help="Path to status files")
-    return parser.parse_args()
+from report import ERROR, FAILURE, SUCCESS, FAIL, OK, TestResult, TestResults, JobReport
+from env_helper import TEMP_PATH
+from stopwatch import Stopwatch
+from ci_config import JobNames
 
 
 def post_commit_status_from_file(file_path: Path) -> List[str]:
@@ -35,92 +25,111 @@ def post_commit_status_from_file(file_path: Path) -> List[str]:
     return res[0]
 
 
-# Returns (is_ok, test_results, error_message)
-def process_result(file_path: Path) -> Tuple[bool, TestResults, Optional[str]]:
-    test_results = []  # type: TestResults
-    state, report_url, description = post_commit_status_from_file(file_path)
-    prefix = file_path.parent.name
-    if description.strip() in [
-        "Invalid check_status.tsv",
-        "Not found test_results.tsv",
-        "Empty test_results.tsv",
-    ]:
-        status = (
-            f'Check failed (<a href="{report_url}">Report</a>)'
-            if report_url != "null"
-            else "Check failed"
-        )
-        return False, [TestResult(f"{prefix}: {description}", status)], "Check failed"
-
-    is_ok = state == SUCCESS
-    if is_ok and report_url == "null":
-        return is_ok, test_results, None
-
-    status = (
-        f'OK: Bug reproduced (<a href="{report_url}">Report</a>)'
-        if is_ok
-        else f'Bug is not reproduced (<a href="{report_url}">Report</a>)'
-    )
-    test_results.append(TestResult(f"{prefix}: {description}", status))
-    return is_ok, test_results, None
+def get_failed_test_cases(file_path: Path) -> List[TestResult]:
+    job_report = JobReport.load(from_file=file_path)
+    test_results = []  # type: List[TestResult]
+    for tr in job_report.test_results:
+        if tr.status == FAIL:
+            tr.name = f"{tr.name} with NOT_OK"
+            tr.status = OK
+        elif tr.status == FAIL:
+            tr.name = f"{tr.name} with NOT_OK"
+            tr.status = FAIL
+        else:
+            # do not inver error status
+            pass
+        test_results.append(tr)
+    return test_results
 
 
 def process_all_results(
-    file_paths: List[Path],
-) -> Tuple[bool, TestResults, Optional[str]]:
-    any_ok = False
-    all_results = []
-    error = None
-    for status_path in file_paths:
-        is_ok, test_results, error = process_result(status_path)
-        any_ok = any_ok or is_ok
-        if test_results is not None:
-            all_results.extend(test_results)
+    file_paths: Sequence[Path],
+) -> Tuple[str, str, TestResults]:
+    all_results = []  # type: TestResults
+    status = SUCCESS
+    for job_report_path in file_paths:
+        test_results = get_failed_test_cases(job_report_path)
+        status_cur = FAILURE
+        for tr in test_results:
+            if tr.status == OK and status_cur == FAILURE:
+                # we have atleast on OK result for "test with not ok"
+                status_cur = SUCCESS
+            elif tr.status == ERROR:
+                # looks like ci infrastructure issue
+                status_cur = ERROR
+        status = SUCCESS if status_cur == SUCCESS else status_cur
+        all_results.extend(test_results)
 
-    return any_ok and error is None, all_results, error
+    description = "New tests reproduced a bug"
+    if status == FAILURE:
+        description = "New tests failed to reproduce a bug"
+    elif status == ERROR:
+        description = "Some error occured in tests"
+
+    return status, description, all_results
 
 
 def main():
     logging.basicConfig(level=logging.INFO)
-    args = parse_args()
-    status_files = args.files  # type: List[Path]
+    # args = parse_args()
+    stopwatch = Stopwatch()
+    jobs_to_validate = [JobNames.STATELESS_TEST_RELEASE, JobNames.INTEGRATION_TEST]
+    functional_job_report_file = Path(TEMP_PATH) / "functional_test_job_report.json"
+    integration_job_report_file = Path(TEMP_PATH) / "integration_test_job_report.json"
+    jobs_report_files = {
+        JobNames.STATELESS_TEST_RELEASE: functional_job_report_file,
+        JobNames.INTEGRATION_TEST: integration_job_report_file,
+    }
+    jobs_scripts = {
+        JobNames.STATELESS_TEST_RELEASE: "functional_test_check.py",
+        JobNames.INTEGRATION_TEST: "integration_test_check.py",
+    }
 
-    check_name_with_group = "Bugfix validate check"
-
-    is_ok, test_results, error = process_all_results(status_files)
-
-    description = ""
-    if error:
-        description = error
-    elif not is_ok:
-        description = "Changed tests don't reproduce the bug"
-
-    pr_info = PRInfo()
-    if not test_results:
-        description = "No results to upload"
-        report_url = ""
-        logging.info("No results to upload")
-    else:
-        report_url = upload_results(
-            S3Helper(),
-            pr_info.number,
-            pr_info.sha,
-            test_results,
-            status_files,
-            check_name_with_group,
+    for test_job in jobs_to_validate:
+        report_file = jobs_report_files[test_job]
+        test_script = jobs_scripts[test_job]
+        if report_file.exists():
+            report_file.unlink()
+        extra_timeout_option = ""
+        if test_job == JobNames.STATELESS_TEST_RELEASE:
+            extra_timeout_option = str(3600)
+        # "bugfix" must be present in checkname, as integration test runner checks this
+        check_name = f"Validate bugfix: {test_job}"
+        command = f"python3 {test_script} '{check_name}' {extra_timeout_option} --validate-bugfix --report-to-file {report_file}"
+        print(f"Going to validate job [{test_job}], command [{command}]")
+        _ = subprocess.run(
+            command,
+            stdout=sys.stdout,
+            stderr=sys.stderr,
+            text=True,
+            check=False,
+            shell=True,
         )
+        assert (
+            report_file.is_file()
+        ), f"No job report [{report_file}] found after job execution"
 
-    gh = Github(get_best_robot_token(), per_page=100)
-    commit = get_commit(gh, pr_info.sha)
-    post_commit_status(
-        commit,
-        SUCCESS if is_ok else ERROR,
-        report_url,
-        description,
-        check_name_with_group,
-        pr_info,
-        dump_to_file=True,
+    status, description, test_results = process_all_results(
+        list(jobs_report_files.values())
     )
+
+    additional_files = []
+    for job_id, report_file in jobs_report_files.items():
+        jr = JobReport.load(from_file=report_file)
+        additional_files.append(report_file)
+        for file in jr.additional_files:
+            file = Path(file)
+            file = file.rename(file.parent / file.name.replace(".", f"_{job_id.name}."))
+            additional_files.append(file)
+
+    JobReport(
+        description=description,
+        test_results=test_results,
+        status=status,
+        start_time=stopwatch.start_time_str,
+        duration=stopwatch.duration_seconds,
+        additional_files=additional_files,
+    ).dump()
 
 
 if __name__ == "__main__":

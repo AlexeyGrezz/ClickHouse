@@ -50,16 +50,16 @@ fi
 
 config_logs_export_cluster /etc/clickhouse-server/config.d/system_logs_export.yaml
 
-if [[ -n "$BUGFIX_VALIDATE_CHECK" ]] && [[ "$BUGFIX_VALIDATE_CHECK" -eq 1 ]]; then
-    sudo cat /etc/clickhouse-server/config.d/zookeeper.xml \
-    | sed "/<use_compression>1<\/use_compression>/d" \
-    > /etc/clickhouse-server/config.d/zookeeper.xml.tmp
-    sudo mv /etc/clickhouse-server/config.d/zookeeper.xml.tmp /etc/clickhouse-server/config.d/zookeeper.xml
+# if [[ -n "$BUGFIX_VALIDATE_CHECK" ]] && [[ "$BUGFIX_VALIDATE_CHECK" -eq 1 ]]; then
+#     sudo cat /etc/clickhouse-server/config.d/zookeeper.xml \
+#     | sed "/<use_compression>1<\/use_compression>/d" \
+#     > /etc/clickhouse-server/config.d/zookeeper.xml.tmp
+#     sudo mv /etc/clickhouse-server/config.d/zookeeper.xml.tmp /etc/clickhouse-server/config.d/zookeeper.xml
 
-    # it contains some new settings, but we can safely remove it
-    rm /etc/clickhouse-server/users.d/s3_cache_new.xml
-    rm /etc/clickhouse-server/config.d/zero_copy_destructive_operations.xml
-fi
+#     # it contains some new settings, but we can safely remove it
+#     rm /etc/clickhouse-server/users.d/s3_cache_new.xml
+#     rm /etc/clickhouse-server/config.d/zero_copy_destructive_operations.xml
+# fi
 
 # For flaky check we also enable thread fuzzer
 if [ "$NUM_TRIES" -gt "1" ]; then
