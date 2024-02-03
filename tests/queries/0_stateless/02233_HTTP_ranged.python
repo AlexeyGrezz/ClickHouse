@@ -210,8 +210,10 @@ class HTTPServerV6(HTTPServer):
 class ThreadedHTTPServer(ThreadingMixIn, HTTPServer):
     pass
 
+
 class ThreadedHTTPServerV6(ThreadingMixIn, HTTPServerV6):
     pass
+
 
 def start_server():
     if IS_IPV6:
