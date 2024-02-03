@@ -92,7 +92,7 @@ public:
     private:
         friend class HostResolvePool;
 
-        explicit Entry(HostResolvePool & pool_, Poco::Net::IPAddress address_)
+        Entry(HostResolvePool & pool_, Poco::Net::IPAddress address_)
             : pool(pool_.getWeakFromThis())
             , address(std::move(address_))
             , resolved_host(address.toString())
@@ -107,12 +107,12 @@ public:
 
     Entry get();
     void update();
-    void updateWeights();
+    void reset();
 
     static HostResolvePoolMetrics getMetrics(MetricsType type);
 
 protected:
-    explicit HostResolvePool(String host_,
+    HostResolvePool(String host_,
                              MetricsType metrics_type,
                              Poco::Timespan history_ = Poco::Timespan(DEFAULT_RESOLVE_TIME_HISTORY_SECONDS, 0));
 
@@ -138,16 +138,21 @@ protected:
         explicit Record(Record && rec) = default;
         Record& operator=(Record && s) = default;
 
-        explicit Record(Record & rec) = delete;
-        Record& operator=(Record & s) = delete;
+        explicit Record(const Record & rec) = default;
+        Record& operator=(const Record & s) = default;
 
         Poco::Net::IPAddress address;
         Poco::Timestamp resolve_time;
         size_t usage = 0;
-        bool fail_bit = false;
-        Poco::Timestamp fail_time;
+        bool failed = false;
+        Poco::Timestamp fail_time = 0;
 
-        uint8_t getWeight() const
+        bool operator <(const Record & r) const
+        {
+            return address < r.address;
+        }
+
+        size_t getWeight() const
         {
             /// There is no goal to make usage's distribution ideally even
             /// The goal is to chose more often new address, but still use old addresses as well
@@ -175,6 +180,7 @@ protected:
     Poco::Net::IPAddress selectBest() TSA_REQUIRES(mutex);
     Records::iterator find(const Poco::Net::IPAddress & address) TSA_REQUIRES(mutex);
     bool isUpdateNeeded();
+    void updateWeights();
     UpdateStats updateImpl(Poco::Timestamp now, std::vector<Poco::Net::IPAddress> & next_gen) TSA_REQUIRES(mutex);
     void initWeightMapImpl() TSA_REQUIRES(mutex);
     void initWeightMap() TSA_REQUIRES(mutex);
@@ -193,7 +199,13 @@ protected:
 
     size_t total_weight TSA_GUARDED_BY(mutex) = 0;
     std::uniform_int_distribution<size_t> random_weight_picker TSA_GUARDED_BY(mutex);
-    std::vector<std::pair<size_t, size_t>> weight_map TSA_GUARDED_BY(mutex);
+    struct TWRecord
+    {
+        size_t weight_prefix_sum = 0;
+        size_t record_index = 0;
+    };
+    using TWeights = std::vector<TWRecord>;
+    TWeights weights TSA_GUARDED_BY(mutex);
 
     Poco::Logger * log = &Poco::Logger::get("ConnectionPool");
 };

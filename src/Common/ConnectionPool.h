@@ -50,6 +50,7 @@ public:
     IEndpointConnectionPool & operator=(const IEndpointConnectionPool &) = delete;
 
     virtual ConnectionPtr getConnection(const ConnectionTimeouts & timeouts) = 0;
+    virtual void dropResolvedHostsCache() = 0;
     virtual ~IEndpointConnectionPool() = default;
 
     static ConnectionPoolMetrics getMetrics(DB::MetricsType type);
@@ -99,7 +100,8 @@ public:
     bool isPoolDeclared(const Poco::URI & uri, ProxyConfiguration proxy_configuration);
     IEndpointConnectionPool::Ptr getPool(const Poco::URI & uri, ProxyConfiguration proxy_configuration);
 
-    void clear();
+    void dropResolvedHostsCache();
+    void dropConnectionsCache();
 
 protected:
     static bool useSecureConnection(const Poco::URI & uri, const ProxyConfiguration & proxy_configuration);

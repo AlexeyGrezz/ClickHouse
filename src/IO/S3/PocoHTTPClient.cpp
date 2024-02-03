@@ -93,6 +93,8 @@ PocoHTTPClientConfiguration::PocoHTTPClientConfiguration(
         bool enable_s3_requests_logging_,
         bool for_disk_s3_,
         bool s3_use_adaptive_timeouts_,
+        size_t connection_pool_soft_limit_,
+        size_t connection_pool_warning_limit_,
         const ThrottlerPtr & get_request_throttler_,
         const ThrottlerPtr & put_request_throttler_,
         std::function<void(const DB::ProxyConfiguration &)> error_report_)
@@ -106,6 +108,8 @@ PocoHTTPClientConfiguration::PocoHTTPClientConfiguration(
     , get_request_throttler(get_request_throttler_)
     , put_request_throttler(put_request_throttler_)
     , s3_use_adaptive_timeouts(s3_use_adaptive_timeouts_)
+    , connection_pool_soft_limit(connection_pool_soft_limit_)
+    , connection_pool_warning_limit(connection_pool_warning_limit_)
     , error_report(error_report_)
 {
 }

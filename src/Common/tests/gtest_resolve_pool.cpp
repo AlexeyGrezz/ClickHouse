@@ -10,7 +10,7 @@ public:
     using ResolveFunction = DB::HostResolvePool::ResolveFunction;
 
     ResolvePoolMock(String host_, Poco::Timespan history_, ResolveFunction && func)
-    : DB::HostResolvePool(std::move(func), DB::MetricsType::METRICS_FOR_HTTP, std::move(host_), history_)
+    : DB::HostResolvePool(std::move(func), DB::MetricsType::METRICS_FOR_S3_DISK, std::move(host_), history_)
     {
     }
 };
@@ -25,6 +25,9 @@ protected:
 
     void SetUp() override {
         DB::CurrentThread::getProfileEvents().reset();
+
+        ASSERT_EQ(0, CurrentMetrics::get(metrics.active_count));
+
         addresses = std::set<String>{"127.0.0.1", "127.0.0.2", "127.0.0.3"};
         // Code here will be called immediately after the constructor (right
         // before each test).
@@ -51,7 +54,7 @@ protected:
         return std::make_shared<ResolvePoolMock>("some_host", Poco::Timespan(history_ms * 1000), std::move(resolve_func));
     }
 
-    DB::HostResolvePoolMetrics metrics = DB::HostResolvePool::getMetrics(DB::MetricsType::METRICS_FOR_HTTP);
+    DB::HostResolvePoolMetrics metrics = DB::HostResolvePool::getMetrics(DB::MetricsType::METRICS_FOR_S3_DISK);
     std::set<String> addresses;
 };
 
@@ -216,12 +219,14 @@ TEST_F(ResolvePoolTest, CanGainEven)
 
 TEST_F(ResolvePoolTest, CanFail)
 {
-    auto pool = make_pool();
+    auto pool = make_pool(10000);
 
     auto failed_addr = pool->get();
     failed_addr.setFail();
 
     ASSERT_EQ(1, DB::CurrentThread::getProfileEvents()[metrics.failed]);
+    ASSERT_EQ(addresses.size(), CurrentMetrics::get(metrics.active_count));
+    ASSERT_EQ(addresses.size(), DB::CurrentThread::getProfileEvents()[metrics.discovered]);
 
     for (size_t i = 0; i < 1000; ++i)
     {

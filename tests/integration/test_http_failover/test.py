@@ -56,9 +56,10 @@ def dst_node_addrs(started_cluster, request):
 
     yield
 
-    # Clear static DNS entries
+    # Clear static DNS entries and all keep alive connections
     src_node.set_hosts([])
     src_node.query("SYSTEM DROP DNS CACHE")
+    src_node.query("SYSTEM DROP CONNECTIONS CACHE")
 
 
 @pytest.mark.parametrize(

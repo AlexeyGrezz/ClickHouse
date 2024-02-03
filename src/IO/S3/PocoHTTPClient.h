@@ -50,7 +50,7 @@ struct PocoHTTPClientConfiguration : public Aws::Client::ClientConfiguration
     HTTPHeaderEntries extra_headers;
 
     /// Not a client parameter in terms of HTTP and we won't send it to the server. Used internally to determine when connection have to be re-established.
-    uint32_t http_keep_alive_timeout_ms = 0;
+    uint32_t http_keep_alive_timeout_ms = DEFAULT_HTTP_KEEP_ALIVE_TIMEOUT * 1000;
     /// See PoolBase::BehaviourOnLimit
     bool s3_use_adaptive_timeouts = true;
 
@@ -71,6 +71,8 @@ private:
         bool enable_s3_requests_logging_,
         bool for_disk_s3_,
         bool s3_use_adaptive_timeouts_,
+        size_t connection_pool_soft_limit_,
+        size_t connection_pool_warning_limit_,
         const ThrottlerPtr & get_request_throttler_,
         const ThrottlerPtr & put_request_throttler_,
         std::function<void(const DB::ProxyConfiguration &)> error_report_

@@ -186,14 +186,14 @@ private:
 
         void reconnect() override
         {
-            LOG_TEST(log, "reconnected : {}", Session::getHost());
+            LOG_TEST(log, "reconnected : {}", getTarget());
 
             ProfileEvents::increment(metrics.reset);
             Session::close();
 
             if (auto lock = pool.lock())
             {
-                LOG_TEST(log, "reconnected by pool: {}", Session::getHost());
+                LOG_TEST(log, "reconnected by pool: {}", getTarget());
                 auto timeouts = DB::getTimeouts(*this);
                 auto new_connection = lock->getConnection(timeouts);
                 jumpToOtherConnection(dynamic_cast<PooledConnection &>(*new_connection));
@@ -201,10 +201,17 @@ private:
             }
             else
             {
-                LOG_TEST(log, "reconnected without pool: {}", Session::getHost());
+                LOG_TEST(log, "reconnected without pool: {}", getTarget());
                 ProfileEvents::increment(metrics.created);
                 Session::reconnect();
             }
+        }
+
+        String getTarget() const
+        {
+            if (!Session::getProxyConfig().host.empty())
+                return fmt::format("{} over proxy {}", Session::getHost(), Session::getProxyConfig().host);
+            return Session::getHost();
         }
 
         void flushRequest() override
@@ -213,17 +220,17 @@ private:
             {
                 request_stream->flush();
 
-                if (auto fixed_steam = dynamic_cast<Poco::Net::HTTPFixedLengthOutputStream *>(request_stream))
+                if (auto * fixed_steam = dynamic_cast<Poco::Net::HTTPFixedLengthOutputStream *>(request_stream))
                 {
                     LOG_TEST(log, "HTTPFixedLengthOutputStream");
                     request_stream_completed = fixed_steam->isComplete();
                 }
-                else if (auto chunked_steam = dynamic_cast<Poco::Net::HTTPChunkedOutputStream *>(request_stream))
+                else if (auto * chunked_steam = dynamic_cast<Poco::Net::HTTPChunkedOutputStream *>(request_stream))
                 {
                     LOG_TEST(log, "HTTPChunkedOutputStream");
                     request_stream_completed = chunked_steam->isComplete();
                 }
-                else if (auto http_stream = dynamic_cast<Poco::Net::HTTPOutputStream *>(request_stream))
+                else if (auto * http_stream = dynamic_cast<Poco::Net::HTTPOutputStream *>(request_stream))
                 {
                     LOG_TEST(log, "HTTPOutputStream");
                     request_stream_completed = http_stream->isComplete();
@@ -247,7 +254,7 @@ private:
 
             for (const auto & header : request)
             {
-                LOG_TEST(log, "headers: {} - {}", header.first, header.second);
+                LOG_TEST(log, "headers {}: {}", header.first, header.second);
             }
 
             std::ostream & result = Session::sendRequest(request);
@@ -298,17 +305,17 @@ private:
             LOG_TEST(log, "flushing response IN {}", bool(response_stream));
             if (response_stream)
             {
-                if (auto fixed_steam = dynamic_cast<Poco::Net::HTTPFixedLengthInputStream *>(response_stream))
+                if (auto * fixed_steam = dynamic_cast<Poco::Net::HTTPFixedLengthInputStream *>(response_stream))
                 {
                     LOG_TEST(log, "HTTPFixedLengthInputStream");
                     response_stream_completed = fixed_steam->isComplete();
                 }
-                else if (auto chunked_steam = dynamic_cast<Poco::Net::HTTPChunkedInputStream *>(response_stream))
+                else if (auto * chunked_steam = dynamic_cast<Poco::Net::HTTPChunkedInputStream *>(response_stream))
                 {
                     LOG_TEST(log, "HTTPChunkedInputStream");
                     response_stream_completed = chunked_steam->isComplete();
                 }
-                else if (auto http_stream = dynamic_cast<Poco::Net::HTTPInputStream *>(response_stream))
+                else if (auto * http_stream = dynamic_cast<Poco::Net::HTTPInputStream *>(response_stream))
                 {
                     LOG_TEST(log, "HTTPInputStream");
                     response_stream_completed = http_stream->isComplete();
@@ -341,7 +348,7 @@ private:
         friend class EndpointConnectionPool;
 
         template<class... Args>
-        PooledConnection(EndpointConnectionPool & pool_, Args&&... args)
+        explicit PooledConnection(EndpointConnectionPool & pool_, Args&&... args)
             : Session(args...)
             , pool(pool_.getWeakFromThis())
             , metrics(pool_.metrics)
@@ -355,7 +362,7 @@ private:
         {
             struct make_shared_enabler : public PooledConnection
             {
-                make_shared_enabler(Args&&... args) : PooledConnection(args...) {}
+                explicit make_shared_enabler(Args&&... args) : PooledConnection(args...) {}
             };
             return std::make_shared<make_shared_enabler>(args...);
         }
@@ -368,6 +375,8 @@ private:
         void jumpToOtherConnection(PooledConnection & connection)
         {
             chassert(this != &connection);
+
+            auto timeouts = DB::getTimeouts(connection);
 
             auto buffer = Poco::Buffer<char>(0);
             connection.drainBuffer(buffer);
@@ -384,6 +393,7 @@ private:
             Session::setLastRequest(connection.getLastRequest());
             Session::setResolvedHost(connection.getResolvedHost());
             Session::setKeepAlive(connection.getKeepAlive());
+            setTimeouts(*this, timeouts);
 
             if (!connection.getProxyConfig().host.empty())
                 Session::setProxyConfig(connection.getProxyConfig());
@@ -427,7 +437,7 @@ public:
     {
         struct make_shared_enabler : public EndpointConnectionPool<Session>
         {
-            make_shared_enabler(Args&&... args) : EndpointConnectionPool<Session>(std::forward<Args>(args)...) {}
+            explicit make_shared_enabler(Args&&... args) : EndpointConnectionPool<Session>(std::forward<Args>(args)...) {}
         };
         return std::make_shared<make_shared_enabler>(std::forward<Args>(args)...);
     }
@@ -436,6 +446,18 @@ public:
     {
         std::lock_guard lock(mutex);
         CurrentMetrics::sub(metrics.stored_count, stored_connections.size());
+    }
+
+    String getTarget() const
+    {
+        if (!proxy_configuration.isEmpty())
+            return fmt::format("{} over proxy {}", host, proxy_configuration.host);
+        return host;
+    }
+
+    void dropResolvedHostsCache() override
+    {
+            resolve_pool->reset();
     }
 
     IEndpointConnectionPool::ConnectionPtr getConnection(const DB::ConnectionTimeouts & timeouts) override
@@ -457,7 +479,7 @@ public:
                 stored_connections.pop();
                 ++reused;
                 setTimeouts(*it, timeouts);
-                LOG_TEST(log, "reused {}", host);
+                LOG_TEST(log, "reused {}", getTarget());
                 return it;
             }
         }
@@ -516,7 +538,7 @@ private:
 
             stored_connections.pop();
             connection->reset();
-            LOG_TEST(log, "expired {}", host);
+            LOG_TEST(log, "expired {}", getTarget());
             ++expired;
         }
     }
@@ -529,7 +551,7 @@ private:
         ConnectionPtr connection = PooledConnection::create(*this, host, port);
         connection->setKeepAlive(true);
 
-        if (proxy_configuration.host.empty())
+        if (!proxy_configuration.isEmpty())
             connection->setProxyConfig(proxyConfigurationToPocoProxyConfig(proxy_configuration));
 
         return connection;
@@ -544,13 +566,13 @@ private:
 
         if (active_sessions_ >= limits.warning_limit && active_sessions_ >= mute_warn_until_)
         {
-            LOG_WARNING(log, "Too many active sessions for the host {}, count {}", host, active_sessions_);
+            LOG_WARNING(log, "Too many active sessions for the host {}, count {}", getTarget(), active_sessions_);
             mute_warn_until.store(roundUp(active_sessions_, 100));
         }
 
         if (active_sessions_ < limits.warning_limit && mute_warn_until_ > 0)
         {
-            LOG_WARNING(log, "Sessions count is OK for the host {}, count {}", host, active_sessions_);
+            LOG_WARNING(log, "Sessions count is OK for the host {}, count {}", getTarget(), active_sessions_);
             mute_warn_until.store(0);
         }
 
@@ -568,11 +590,12 @@ private:
             address.setFail();
             ProfileEvents::increment(metrics.errors);
             session->reset();
-            LOG_TEST(log, "new session failed {} {}", active_connections, host);
+            LOG_TEST(log, "new session failed {} {}, conn timeout {}ms",
+                     active_connections, getTarget(), timeouts.connection_timeout.totalMilliseconds());
             throw;
         }
 
-        LOG_TEST(log, "new session created {} {}", active_connections, host);
+        LOG_TEST(log, "new session created {} {}", active_connections, getTarget());
         ProfileEvents::increment(metrics.created);
         return session;
     }
@@ -590,19 +613,26 @@ private:
 
         if (!connection.connected())
         {
-            LOG_TEST(log, "reset !connected {}", host);
+            LOG_TEST(log, "reset !connected {}", getTarget());
             return;
         }
 
         if (connection.mustReconnect())
         {
-            LOG_TEST(log, "reset mustReconnect {}", host);
+            LOG_TEST(log, "reset mustReconnect {}, kat {}ms, age {}ms",
+                     getTarget(), connection.getKeepAliveTimeout().totalMilliseconds(), (Poco::Timestamp() - connection.getLastRequest()) / 1000);
             return;
         }
 
         if (!connection.isCompleted())
         {
-            LOG_TEST(log, "reset !isCompleted {}", host);
+            LOG_TEST(log, "reset !isCompleted {}", getTarget());
+            return;
+        }
+
+        if (connection.buffered())
+        {
+            LOG_TEST(log, "reset buffered {}", getTarget());
             return;
         }
 
@@ -611,12 +641,10 @@ private:
 
             auto connection_to_store = allocateNewConnection();
             connection_to_store->jumpToOtherConnection(connection);
-            auto timeouts = DB::getTimeouts(connection);
-            setTimeouts(*connection_to_store, timeouts);
             stored_connections.push(connection_to_store);
             ++preserved;
         }
-        LOG_TEST(log, "preserved {}", host);
+        LOG_TEST(log, "preserved {}", getTarget());
     }
 
     const std::string host;
@@ -862,8 +890,30 @@ std::tuple<std::string, UInt16, bool>
     return std::make_tuple(uri.getHost(), uri.getPort(), useSecureConnection(uri, proxy_configuration));
 }
 
-void DB::ConnectionPools::clear()
+void DB::ConnectionPools::dropResolvedHostsCache()
 {
+    std::vector<IEndpointConnectionPool::Ptr> gathered_pools;
+
+    {
+        std::unique_lock lock(mutex);
+
+        gathered_pools.reserve(endpoints_pool.size());
+        for (auto & [_, pool] : endpoints_pool)
+        {
+            gathered_pools.push_back(pool);
+        }
+    }
+
+    for (auto & pool : gathered_pools)
+    {
+        pool->dropResolvedHostsCache();
+    }
+}
+
+
+void DB::ConnectionPools::dropConnectionsCache()
+{
+    /// TODO: drop connections inside pools not all pools
     std::unique_lock lock(mutex);
     endpoints_pool.clear();
 }

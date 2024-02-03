@@ -149,12 +149,11 @@ void setTimeouts(Poco::Net::HTTPClientSession & session, const ConnectionTimeout
 
 ConnectionTimeouts getTimeouts(Poco::Net::HTTPClientSession & session)
 {
-    auto timeouts = ConnectionTimeouts();
-    timeouts.connection_timeout = session.getConnectionTimeout();
-    timeouts.send_timeout = session.getSendTimeout();
-    timeouts.receive_timeout = session.getReceiveTimeout();
-    timeouts.http_keep_alive_timeout = session.getKeepAliveTimeout();
-    return timeouts;
+    return ConnectionTimeouts()
+            .withConnectionTimeout(session.getConnectionTimeout())
+            .withSendTimeout(session.getSendTimeout())
+            .withReceiveTimeout(session.getReceiveTimeout())
+            .withHttpKeepAliveTimeout(session.getKeepAliveTimeout());
 }
 
 }

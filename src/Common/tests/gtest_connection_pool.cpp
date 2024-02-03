@@ -17,6 +17,9 @@
 #include <thread>
 #include <gtest/gtest.h>
 
+namespace
+{
+
 size_t stream_copy_n(std::istream & in, std::ostream & out, std::size_t count = std::numeric_limits<size_t>::max())
 {
     const size_t buffer_size = 4096;
@@ -47,65 +50,62 @@ size_t stream_copy_n(std::istream & in, std::ostream & out, std::size_t count = 
 class MockRequestHandler : public Poco::Net::HTTPRequestHandler
 {
 public:
-    MockRequestHandler(DB::ConnectionTimeouts & timeouts)
-        :slowdown(timeouts)
+    explicit MockRequestHandler(std::shared_ptr<std::atomic<size_t>> slowdown_)
+        : slowdown(std::move(slowdown_))
     {
     }
 
     void handleRequest(Poco::Net::HTTPServerRequest & request, Poco::Net::HTTPServerResponse & response) override
     {
-        std::cerr << "handler\n";
         response.setStatus(Poco::Net::HTTPResponse::HTTP_OK);
         size_t size = request.getContentLength();
         response.setContentLength(size); // ContentLength is required for keep alive
 
-        sleepForMicroseconds(slowdown.receive_timeout.totalMicroseconds());
+        sleepForSeconds(*slowdown);
 
-        std::cerr << "handler write: " << size << "\n";
-        size_t copied = stream_copy_n(request.stream(), response.send(), size);
-        std::cerr << "handleRequest: " << copied << "/" << size  << std::endl;
+        stream_copy_n(request.stream(), response.send(), size);
     }
 
-    DB::ConnectionTimeouts & slowdown;
+    std::shared_ptr<std::atomic<size_t>> slowdown;
 };
 
 class HTTPRequestHandlerFactory : public Poco::Net::HTTPRequestHandlerFactory
 {
 public:
-    HTTPRequestHandlerFactory(DB::ConnectionTimeouts & timeouts)
-        :slowdown(timeouts)
+    explicit HTTPRequestHandlerFactory(std::shared_ptr<std::atomic<size_t>> slowdown_)
+        : slowdown(std::move(slowdown_))
     {
     }
 
-    virtual Poco::Net::HTTPRequestHandler * createRequestHandler(const Poco::Net::HTTPServerRequest &) override
+    Poco::Net::HTTPRequestHandler * createRequestHandler(const Poco::Net::HTTPServerRequest &) override
     {
         return new MockRequestHandler(slowdown);
     }
 
-    DB::ConnectionTimeouts & slowdown;
+    std::shared_ptr<std::atomic<size_t>> slowdown;
 };
+
+}
 
 using HTTPSession = Poco::Net::HTTPClientSession;
 using HTTPSessionPtr = std::shared_ptr<Poco::Net::HTTPClientSession>;
 
 class ConnectionPoolTest : public testing::Test {
 protected:
-    ConnectionPoolTest() = default;
+    ConnectionPoolTest()
+    {
+        startServer();
+    }
 
     // If the constructor and destructor are not enough for setting up
     // and cleaning up each test, you can define the following methods:
 
     void SetUp() override {
         timeouts = DB::ConnectionTimeouts();
-        slowdown_timeouts = DB::ConnectionTimeouts()
-                            .withConnectionTimeout(0)
-                            .withReceiveTimeout(0)
-                            .withSendTimeout(0)
-                            .withHttpKeepAliveTimeout(0);
+        setSlowDown(0);
 
-        DB::ConnectionPools::instance().clear();
+        DB::ConnectionPools::instance().dropConnectionsCache();
         DB::CurrentThread::getProfileEvents().reset();
-        startServer();
         // Code here will be called immediately after the constructor (right
         // before each test).
     }
@@ -121,17 +121,17 @@ protected:
         return DB::ConnectionPools::instance().getPool(uri, DB::ProxyConfiguration{});
     }
 
-    std::string getServerUrl()
+    std::string getServerUrl() const
     {
         return "http://" + server_data.socket->address().toString();
     }
 
     void startServer()
     {
-        server_data = {};
+        server_data.reset();
         server_data.params = new Poco::Net::HTTPServerParams();
-        server_data.handler_factory = new HTTPRequestHandlerFactory(slowdown_timeouts);
         server_data.socket.reset(new Poco::Net::ServerSocket(server_data.port));
+        server_data.handler_factory = new HTTPRequestHandlerFactory(slowdown_receive);
         server_data.server.reset(
             new Poco::Net::HTTPServer(server_data.handler_factory, *server_data.socket, server_data.params));
 
@@ -143,26 +143,52 @@ protected:
         return *server_data.server;
     }
 
-    struct
+    void setSlowDown(size_t seconds)
+    {
+        *slowdown_receive = seconds;
+    }
+
+    DB::ConnectionPoolMetrics metrics = DB::IEndpointConnectionPool::getMetrics(DB::MetricsType::METRICS_FOR_HTTP);
+    DB::ConnectionTimeouts timeouts;
+    std::shared_ptr<std::atomic<size_t>> slowdown_receive = std::make_shared<std::atomic<size_t>>(0);
+
+    struct ServerData
     {
         // just some port to avoid collisions with others tests
         UInt16 port = 9871;
         Poco::Net::HTTPServerParams::Ptr params;
-        HTTPRequestHandlerFactory::Ptr handler_factory;
         std::unique_ptr<Poco::Net::ServerSocket> socket;
+        HTTPRequestHandlerFactory::Ptr handler_factory;
         std::unique_ptr<Poco::Net::HTTPServer> server;
-    } server_data;
 
-    DB::ConnectionPoolMetrics metrics = DB::IEndpointConnectionPool::getMetrics(DB::MetricsType::METRICS_FOR_HTTP);
-    DB::ConnectionTimeouts timeouts;
-    DB::ConnectionTimeouts slowdown_timeouts;
+        ServerData() = default;
+        ServerData(ServerData &&) = default;
+        ServerData & operator =(ServerData &&) = delete;
+
+        void reset()
+        {
+            if (server)
+                server->stop();
+
+            server = nullptr;
+            handler_factory = nullptr;
+            socket = nullptr;
+            params = nullptr;
+        }
+
+        ~ServerData() {
+            reset();
+        }
+    };
+
+    ServerData server_data;
 };
 
 
 void wait_until(std::function<bool()> pred)
 {
     while (!pred())
-        Poco::Thread::sleep(250);
+        sleepForMilliseconds(250);
 }
 
 void echoRequest(String data, HTTPSession & session)
@@ -241,7 +267,6 @@ TEST_F(ConnectionPoolTest, CanPreserve)
 
     {
         auto connection = pool->getConnection(timeouts);
-        // DB::setReuseTag(*connection);
         std::cerr << "implicit save connection with reuse tag" << std::endl;
     }
 
@@ -439,10 +464,8 @@ TEST_F(ConnectionPoolTest, CanReconnectAndReuse)
 
 TEST_F(ConnectionPoolTest, ReceiveTimeout)
 {
-    slowdown_timeouts.withReceiveTimeout(2);
+    setSlowDown(2);
     timeouts.withReceiveTimeout(1);
-
-    startServer();
 
     auto pool = getPool();
 
