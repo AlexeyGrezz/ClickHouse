@@ -52,7 +52,7 @@ public:
     /// Return true if column with name exists, false otherwise
     bool hasColumn(const std::string & column_name) const
     {
-        return alias_columns_names.contains(column_name) || column_name_to_column.contains(column_name);
+        return alias_columns_expressions.contains(column_name) || column_name_to_column.contains(column_name);
     }
 
     /** Add column in table expression data.
@@ -79,18 +79,25 @@ public:
         addColumnImpl(column, column_identifier);
     }
 
-    /// Add alias column name
-    void addAliasColumnName(const std::string & column_name, const ColumnIdentifier & column_identifier)
+    /// Add alias column
+    void addAliasColumn(const std::string & column_name, const ColumnIdentifier & column_identifier, ActionsDAGPtr actions_dag)
     {
-        alias_columns_names.insert(column_name);
+        alias_columns_names.emplace_back(column_name);
+        alias_columns_expressions.emplace(column_name, std::move(actions_dag));
 
         column_name_to_column_identifier.emplace(column_name, column_identifier);
     }
 
     /// Get alias columns names
-    const NameSet & getAliasColumnsNames() const
+    const Names & getAliasColumnsNames() const
     {
         return alias_columns_names;
+    }
+
+    /// Get alias columns names mapped to expressions
+    const std::unordered_map<std::string, ActionsDAGPtr> & getAliasColumnsExpressions() const
+    {
+        return alias_columns_expressions;
     }
 
     /// Get column name to column map
@@ -298,7 +305,8 @@ private:
     ColumnNameToColumn column_name_to_column;
 
     /// Valid only for table node
-    NameSet alias_columns_names;
+    Names alias_columns_names;
+    std::unordered_map<std::string, ActionsDAGPtr> alias_columns_expressions;
 
     /// Valid for table, table function, array join, query, union nodes
     ColumnNameToColumnIdentifier column_name_to_column_identifier;

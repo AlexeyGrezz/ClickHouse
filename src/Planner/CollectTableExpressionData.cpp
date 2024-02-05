@@ -29,34 +29,12 @@ namespace
 class CollectSourceColumnsVisitor : public InDepthQueryTreeVisitor<CollectSourceColumnsVisitor>
 {
 public:
-    explicit CollectSourceColumnsVisitor(PlannerContext & planner_context_)
+    explicit CollectSourceColumnsVisitor(PlannerContextPtr & planner_context_)
         : planner_context(planner_context_)
     {}
 
     void visitImpl(QueryTreeNodePtr & node)
     {
-        /// Special case for USING clause which contains references to ALIAS columns.
-        /// We can not modify such ColumnNode.
-        if (auto * join_node = node->as<JoinNode>())
-        {
-            if (!join_node->isUsingJoinExpression())
-                return;
-
-            auto & using_list = join_node->getJoinExpression()->as<ListNode&>();
-            for (auto & using_element : using_list)
-            {
-                auto & column_node = using_element->as<ColumnNode&>();
-                /// This list contains column nodes from left and right tables.
-                auto & columns_from_subtrees = column_node.getExpressionOrThrow()->as<ListNode&>().getNodes();
-
-                /// Visit left table column node.
-                visitUsingColumn(columns_from_subtrees[0]);
-                /// Visit right table column node.
-                visitUsingColumn(columns_from_subtrees[1]);
-            }
-            return;
-        }
-
         auto * column_node = node->as<ColumnNode>();
         if (!column_node)
             return;
@@ -72,22 +50,42 @@ public:
 
         /// JOIN using expression
         if (column_node->hasExpression() && column_source_node_type == QueryTreeNodeType::JOIN)
+        {
+            auto & columns_from_subtrees = column_node->getExpressionOrThrow()->as<ListNode &>().getNodes();
+            if (columns_from_subtrees.size() != 2)
+                throw Exception(ErrorCodes::LOGICAL_ERROR,
+                    "Expected two columns in JOIN using expression for column {}", column_node->dumpTree());
+
+            visit(columns_from_subtrees[0]);
+            visit(columns_from_subtrees[1]);
             return;
+        }
 
-        auto & table_expression_data = planner_context.getOrCreateTableExpressionData(column_source_node);
+        auto & table_expression_data = planner_context->getOrCreateTableExpressionData(column_source_node);
 
-        if (column_node->hasExpression() && column_source_node_type != QueryTreeNodeType::ARRAY_JOIN)
+        if (column_node->hasExpression() &&
+            column_source_node_type != QueryTreeNodeType::ARRAY_JOIN)
         {
             /// Replace ALIAS column with expression
             bool column_already_exists = table_expression_data.hasColumn(column_node->getColumnName());
             if (!column_already_exists)
             {
-                auto column_identifier = planner_context.getGlobalPlannerContext()->createColumnIdentifier(node);
-                table_expression_data.addAliasColumnName(column_node->getColumnName(), column_identifier);
+                visit(column_node->getExpression());
+
+                auto column_identifier = planner_context->getGlobalPlannerContext()->createColumnIdentifier(node);
+
+                ActionsDAGPtr alias_column_actions_dag = std::make_shared<ActionsDAG>();
+                PlannerActionsVisitor actions_visitor(planner_context, false);
+                auto outputs = actions_visitor.visit(alias_column_actions_dag, column_node->getExpression());
+                if (outputs.size() != 1)
+                    throw Exception(ErrorCodes::LOGICAL_ERROR,
+                        "Expected single output in actions dag for alias column {}. Actual {}", column_node->dumpTree(), outputs.size());
+                const auto & column_name = column_node->getColumnName();
+                const auto & alias_node = alias_column_actions_dag->addAlias(*outputs[0], column_name);
+                alias_column_actions_dag->addOrReplaceInOutputs(alias_node);
+                table_expression_data.addAliasColumn(column_name, column_identifier, alias_column_actions_dag);
             }
 
-            node = column_node->getExpression();
-            visitImpl(node);
             return;
         }
 
@@ -104,43 +102,18 @@ public:
         if (column_already_exists)
             return;
 
-        auto column_identifier = planner_context.getGlobalPlannerContext()->createColumnIdentifier(node);
+        auto column_identifier = planner_context->getGlobalPlannerContext()->createColumnIdentifier(node);
         table_expression_data.addColumn(column_node->getColumn(), column_identifier);
     }
 
-    static bool needChildVisit(const QueryTreeNodePtr & parent, const QueryTreeNodePtr & child_node)
+    static bool needChildVisit(const QueryTreeNodePtr &, const QueryTreeNodePtr & child_node)
     {
-        if (auto * join_node = parent->as<JoinNode>())
-        {
-            if (join_node->getJoinExpression() == child_node && join_node->isUsingJoinExpression())
-                return false;
-        }
         auto child_node_type = child_node->getNodeType();
         return !(child_node_type == QueryTreeNodeType::QUERY || child_node_type == QueryTreeNodeType::UNION);
     }
 
 private:
-
-    void visitUsingColumn(QueryTreeNodePtr & node)
-    {
-        auto & column_node = node->as<ColumnNode&>();
-        if (column_node.hasExpression())
-        {
-            auto & table_expression_data = planner_context.getOrCreateTableExpressionData(column_node.getColumnSource());
-            bool column_already_exists = table_expression_data.hasColumn(column_node.getColumnName());
-            if (column_already_exists)
-                return;
-
-            auto column_identifier = planner_context.getGlobalPlannerContext()->createColumnIdentifier(node);
-            table_expression_data.addAliasColumnName(column_node.getColumnName(), column_identifier);
-
-            visitImpl(column_node.getExpressionOrThrow());
-        }
-        else
-            visitImpl(node);
-    }
-
-    PlannerContext & planner_context;
+    PlannerContextPtr & planner_context;
 };
 
 class CollectPrewhereTableExpressionVisitor : public ConstInDepthQueryTreeVisitor<CollectPrewhereTableExpressionVisitor>
@@ -274,7 +247,7 @@ void collectTableExpressionData(QueryTreeNodePtr & query_node, PlannerContextPtr
         }
     }
 
-    CollectSourceColumnsVisitor collect_source_columns_visitor(*planner_context);
+    CollectSourceColumnsVisitor collect_source_columns_visitor(planner_context);
     for (auto & node : query_node_typed.getChildren())
     {
         if (!node || node == query_node_typed.getPrewhere())
@@ -326,7 +299,7 @@ void collectTableExpressionData(QueryTreeNodePtr & query_node, PlannerContextPtr
 
 void collectSourceColumns(QueryTreeNodePtr & expression_node, PlannerContextPtr & planner_context)
 {
-    CollectSourceColumnsVisitor collect_source_columns_visitor(*planner_context);
+    CollectSourceColumnsVisitor collect_source_columns_visitor(planner_context);
     collect_source_columns_visitor.visit(expression_node);
 }
 
