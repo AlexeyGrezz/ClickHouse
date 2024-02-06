@@ -23,21 +23,17 @@ class Context;
  * On worker node it asks initiator about next task to process, processes it.
  * This is repeated until the tasks are finished.
  */
-class TableFunctionAzureBlobStorageCluster : public ITableFunctionCluster<TableFunctionAzureBlobStorage>
+
+template <typename StorageSettings>
+class TableFunctionAzureBlobStorageCluster : public ITableFunctionCluster<TableFunctionAzureBlobStorage<StorageSettings>>
 {
 public:
     static constexpr auto name = "azureBlobStorageCluster";
     static constexpr auto signature = " - cluster, connection_string|storage_account_url, container_name, blobpath, [account_name, account_key, format, compression, structure]";
 
-    String getName() const override
-    {
-        return name;
-    }
+    String getName() const override { return name; }
 
-    String getSignature() const override
-    {
-        return signature;
-    }
+    String getSignature() const override { return signature; }
 
 protected:
     StoragePtr executeImpl(

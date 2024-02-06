@@ -5,7 +5,7 @@
 #if USE_AZURE_BLOB_STORAGE
 
 #include <TableFunctions/ITableFunction.h>
-#include <Storages/StorageAzureBlob.h>
+#include <Storages/StorageObjectStorage.h>
 
 
 namespace DB
@@ -15,6 +15,7 @@ class Context;
 
 /* AzureBlob(source, [access_key_id, secret_access_key,] [format, compression, structure]) - creates a temporary storage for a file in AzureBlob.
  */
+template <typename StorageSettings>
 class TableFunctionAzureBlobStorage : public ITableFunction
 {
 public:
@@ -33,19 +34,13 @@ public:
 
     static size_t getMaxNumberOfArguments() { return 8; }
 
-    String getName() const override
-    {
-        return name;
-    }
+    String getName() const override { return name; }
 
-    virtual String getSignature() const
-    {
-        return signature;
-    }
+    virtual String getSignature() const { return signature; }
 
-    bool hasStaticStructure() const override { return configuration.structure != "auto"; }
+    bool hasStaticStructure() const override { return configuration->structure != "auto"; }
 
-    bool needStructureHint() const override { return configuration.structure == "auto"; }
+    bool needStructureHint() const override { return configuration->structure == "auto"; }
 
     void setStructureHint(const ColumnsDescription & structure_hint_) override { structure_hint = structure_hint_; }
 
@@ -70,8 +65,10 @@ protected:
 
     ColumnsDescription getActualTableStructure(ContextPtr context, bool is_insert_query) const override;
     void parseArguments(const ASTPtr & ast_function, ContextPtr context) override;
+    ObjectStoragePtr getObjectStorage(const ContextPtr & context, bool create_readonly) const;
 
-    mutable StorageAzureBlob::Configuration configuration;
+    mutable typename StorageObjectStorage<StorageSettings>::ConfigurationPtr configuration;
+    mutable ObjectStoragePtr object_storage;
     ColumnsDescription structure_hint;
 };
 

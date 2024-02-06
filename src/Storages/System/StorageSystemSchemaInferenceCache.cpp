@@ -3,7 +3,7 @@
 #include <Storages/StorageS3.h>
 #include <Storages/StorageURL.h>
 #include <Storages/HDFS/StorageHDFS.h>
-#include <Storages/StorageAzureBlob.h>
+#include <Storages/StorageObjectStorage.h>
 #include <DataTypes/DataTypeString.h>
 #include <DataTypes/DataTypeDateTime.h>
 #include <DataTypes/DataTypesNumber.h>
@@ -83,7 +83,7 @@ void StorageSystemSchemaInferenceCache::fillData(MutableColumns & res_columns, C
 #endif
     fillDataImpl(res_columns, StorageURL::getSchemaCache(context), "URL");
 #if USE_AZURE_BLOB_STORAGE
-    fillDataImpl(res_columns, StorageAzureBlob::getSchemaCache(context), "Azure");
+    fillDataImpl(res_columns, StorageAzureBlobStorage::getSchemaCache(context), "Azure"); /// FIXME
 #endif
 }
 
