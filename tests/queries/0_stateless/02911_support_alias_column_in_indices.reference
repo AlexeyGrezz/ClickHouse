@@ -14,7 +14,7 @@ Expression ((Projection + Before ORDER BY))
         Parts: 1/1
         Granules: 1/1
 Expression ((Project names + Projection))
-  Filter ((WHERE + Change column names to column identifiers))
+  Filter ((WHERE + (Change column names to column identifiers + Compute alias columns)))
     ReadFromMergeTree (02911_support_alias_column_in_indices.test1)
     Indexes:
       PrimaryKey
@@ -44,7 +44,7 @@ Expression ((Projection + Before ORDER BY))
         Parts: 1/1
         Granules: 1/1
 Expression ((Project names + Projection))
-  Filter ((WHERE + Change column names to column identifiers))
+  Filter ((WHERE + (Change column names to column identifiers + Compute alias columns)))
     ReadFromMergeTree (02911_support_alias_column_in_indices.test2)
     Indexes:
       PrimaryKey
