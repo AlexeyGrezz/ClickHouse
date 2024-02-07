@@ -1,9 +1,6 @@
-#include "Storages/StorageAzureBlobCluster.h"
+#include "Storages/StorageObjectStorageCluster.h"
 
 #include "config.h"
-
-#if USE_AZURE_BLOB_STORAGE
-
 #include <Interpreters/AddDefaultDatabaseVisitor.h>
 #include <Interpreters/InterpreterSelectQuery.h>
 #include <Processors/Sources/RemoteSource.h>
@@ -14,11 +11,9 @@
 #include <Storages/StorageDictionary.h>
 #include <Storages/extractTableFunctionArgumentsFromSelectQuery.h>
 #include <Storages/VirtualColumnUtils.h>
+#include <Storages/StorageAzureBlobConfiguration.h>
 #include <Common/Exception.h>
 #include <Parsers/queryToString.h>
-#include <TableFunctions/TableFunctionAzureBlobStorageCluster.h>
-
-#include <memory>
 
 namespace DB
 {
@@ -28,8 +23,8 @@ namespace ErrorCodes
     extern const int LOGICAL_ERROR;
 }
 
-template <typename StorageSettings>
-StorageAzureBlobCluster<StorageSettings>::StorageAzureBlobCluster(
+template <typename Definition, typename StorageSettings, typename Configuration>
+StorageObjectStorageCluster<Definition, StorageSettings, Configuration>::StorageObjectStorageCluster(
     const String & cluster_name_,
     const StorageObjectStorageConfigurationPtr & configuration_,
     ObjectStoragePtr object_storage_,
@@ -52,7 +47,7 @@ StorageAzureBlobCluster<StorageSettings>::StorageAzureBlobCluster(
 
     if (columns_.empty())
     {
-        /// `format_settings` is set to std::nullopt, because StorageAzureBlobCluster is used only as table function
+        /// `format_settings` is set to std::nullopt, because StorageObjectStorageCluster is used only as table function
         auto columns = StorageObjectStorage<StorageSettings>::getTableStructureFromData(
             object_storage, configuration, /*format_settings=*/std::nullopt, context_);
         storage_metadata.setColumns(columns);
@@ -67,8 +62,8 @@ StorageAzureBlobCluster<StorageSettings>::StorageAzureBlobCluster(
         storage_metadata.getSampleBlock().getNamesAndTypesList());
 }
 
-template <typename StorageSettings>
-void StorageAzureBlobCluster<StorageSettings>::addColumnsStructureToQuery(
+template <typename Definition, typename StorageSettings, typename Configuration>
+void StorageObjectStorageCluster<Definition, StorageSettings, Configuration>::addColumnsStructureToQuery(
     ASTPtr & query,
     const String & structure,
     const ContextPtr & context)
@@ -80,13 +75,11 @@ void StorageAzureBlobCluster<StorageSettings>::addColumnsStructureToQuery(
                         "Expected SELECT query from table function s3Cluster, got '{}'",
                         queryToString(query));
     }
-
-    TableFunctionAzureBlobStorageCluster<StorageSettings>::addColumnsStructureToArguments(
-        expression_list->children, structure, context);
+    Configuration::addStructureToArgs(expression_list->children, structure, context);
 }
 
-template <typename StorageSettings>
-RemoteQueryExecutor::Extension StorageAzureBlobCluster<StorageSettings>::getTaskIteratorExtension(
+template <typename Definition, typename StorageSettings, typename Configuration>
+RemoteQueryExecutor::Extension StorageObjectStorageCluster<Definition, StorageSettings, Configuration>::getTaskIteratorExtension(
     const ActionsDAG::Node * predicate,
     const ContextPtr & context) const
 {
@@ -100,8 +93,12 @@ RemoteQueryExecutor::Extension StorageAzureBlobCluster<StorageSettings>::getTask
     return RemoteQueryExecutor::Extension{ .task_iterator = std::move(callback) };
 }
 
-template class StorageAzureBlobCluster<AzureStorageSettings>;
+
+#if USE_AWS_S3
+template class StorageObjectStorageCluster<S3ClusterDefinition, S3StorageSettings, StorageS3Configuration>;
+#endif
+#if USE_AZURE_BLOB_STORAGE
+template class StorageObjectStorageCluster<AzureClusterDefinition, AzureStorageSettings, StorageAzureBlobConfiguration>;
+#endif
 
 }
-
-#endif

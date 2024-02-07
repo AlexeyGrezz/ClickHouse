@@ -120,25 +120,22 @@ private:
     {
         ProfileEvents::increment(ProfileEvents::S3ListObjects);
 
-        bool result = false;
         auto outcome = client->ListObjectsV2(request);
+
         /// Outcome failure will be handled on the caller side.
         if (outcome.IsSuccess())
         {
+            request.SetContinuationToken(outcome.GetResult().GetNextContinuationToken());
+
             auto objects = outcome.GetResult().GetContents();
-
-            result = !objects.empty();
-
             for (const auto & object : objects)
-                batch.emplace_back(
-                    object.GetKey(),
-                    ObjectMetadata{static_cast<uint64_t>(object.GetSize()), Poco::Timestamp::fromEpochTime(object.GetLastModified().Seconds()), {}}
-                );
+            {
+                ObjectMetadata metadata{static_cast<uint64_t>(object.GetSize()), Poco::Timestamp::fromEpochTime(object.GetLastModified().Seconds()), {}};
+                batch.emplace_back(object.GetKey(), std::move(metadata));
+            }
 
-            if (result)
-                request.SetContinuationToken(outcome.GetResult().GetNextContinuationToken());
-
-            return result;
+            /// It returns false when all objects were returned
+            return outcome.GetResult().GetIsTruncated();
         }
 
         throw S3Exception(outcome.GetError().GetErrorType(), "Could not list objects in bucket {} with prefix {}, S3 exception: {}, message: {}",

@@ -1,31 +1,31 @@
 #include "config.h"
 
-#if USE_AZURE_BLOB_STORAGE
-
-#include <TableFunctions/TableFunctionAzureBlobStorageCluster.h>
 #include <TableFunctions/TableFunctionFactory.h>
+#include <TableFunctions/TableFunctionObjectStorageCluster.h>
+#include <TableFunctions/registerTableFunctions.h>
+
 #include <Interpreters/parseColumnsListForTableFunction.h>
 #include <Storages/StorageObjectStorage.h>
-
-#include "registerTableFunctions.h"
+#include <Storages/StorageObjectStorageCluster.h>
 
 
 namespace DB
 {
 
-template <typename StorageSettings>
-StoragePtr TableFunctionAzureBlobStorageCluster<StorageSettings>::executeImpl(
+template <typename Definition, typename StorageSettings, typename Configuration>
+StoragePtr TableFunctionObjectStorageCluster<Definition, StorageSettings, Configuration>::executeImpl(
     const ASTPtr & /*function*/, ContextPtr context,
     const std::string & table_name, ColumnsDescription /*cached_columns*/, bool is_insert_query) const
 {
-    using Base = TableFunctionAzureBlobStorage<StorageSettings>;
+    using Base = TableFunctionObjectStorage<Definition, StorageSettings, Configuration>;
+
     StoragePtr storage;
     ColumnsDescription columns;
     bool structure_argument_was_provided = Base::configuration->structure != "auto";
 
     if (structure_argument_was_provided)
     {
-        columns = parseColumnsListFromString(TableFunctionAzureBlobStorage<StorageSettings>::configuration->structure, context);
+        columns = parseColumnsListFromString(Base::configuration->structure, context);
     }
     else if (!Base::structure_hint.empty())
     {
@@ -38,7 +38,7 @@ StoragePtr TableFunctionAzureBlobStorageCluster<StorageSettings>::executeImpl(
         storage = std::make_shared<StorageObjectStorage<StorageSettings>>(
             Base::configuration,
             Base::configuration->createOrUpdateObjectStorage(context, !is_insert_query),
-            "AzureBlobStorage",
+            Definition::storage_type_name,
             context,
             StorageID(Base::getDatabaseName(), table_name),
             columns,
@@ -50,11 +50,11 @@ StoragePtr TableFunctionAzureBlobStorageCluster<StorageSettings>::executeImpl(
     }
     else
     {
-        storage = std::make_shared<StorageAzureBlobCluster<StorageSettings>>(
+        storage = std::make_shared<StorageObjectStorageCluster<Definition, StorageSettings, Configuration>>(
             ITableFunctionCluster<Base>::cluster_name,
             Base::configuration,
             Base::configuration->createOrUpdateObjectStorage(context, !is_insert_query),
-            "AzureBlobStorageCluster",
+            Definition::storage_type_name,
             StorageID(Base::getDatabaseName(), table_name),
             columns,
             ConstraintsDescription{},
@@ -67,9 +67,10 @@ StoragePtr TableFunctionAzureBlobStorageCluster<StorageSettings>::executeImpl(
 }
 
 
-void registerTableFunctionAzureBlobStorageCluster(TableFunctionFactory & factory)
+void registerTableFunctionObjectStorageCluster(TableFunctionFactory & factory)
 {
-    factory.registerFunction<TableFunctionAzureBlobStorageCluster<AzureStorageSettings>>(
+#if USE_AWS_S3
+    factory.registerFunction<TableFunctionS3Cluster>(
     {
         .documentation = {
             .description=R"(The table function can be used to read the data stored on Azure Blob Storage in parallel for many nodes in a specified cluster.)",
@@ -77,10 +78,24 @@ void registerTableFunctionAzureBlobStorageCluster(TableFunctionFactory & factory
             .allow_readonly = false
         }
     );
-}
-
-template class TableFunctionAzureBlobStorageCluster<AzureStorageSettings>;
-
-}
-
 #endif
+#if USE_AZURE_BLOB_STORAGE
+    factory.registerFunction<TableFunctionAzureBlobCluster>(
+    {
+        .documentation = {
+            .description=R"(The table function can be used to read the data stored on Azure Blob Storage in parallel for many nodes in a specified cluster.)",
+            .examples{{"azureBlobStorageCluster", "SELECT * FROM  azureBlobStorageCluster(cluster, connection_string|storage_account_url, container_name, blobpath, [account_name, account_key, format, compression, structure])", ""}}},
+            .allow_readonly = false
+        }
+    );
+#endif
+}
+
+#if USE_AWS_S3
+template class TableFunctionObjectStorageCluster<S3ClusterDefinition, S3StorageSettings, StorageS3Configuration>;
+#endif
+#if USE_AZURE_BLOB_STORAGE
+template class TableFunctionObjectStorageCluster<AzureClusterDefinition, AzureStorageSettings, StorageAzureBlobConfiguration>;
+#endif
+
+}

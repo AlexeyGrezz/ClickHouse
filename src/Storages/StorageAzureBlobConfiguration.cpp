@@ -7,6 +7,8 @@
 #include <Formats/FormatFactory.h>
 #include <azure/storage/blobs.hpp>
 #include <Interpreters/evaluateConstantExpression.h>
+#include <Parsers/ASTIdentifier.h>
+#include <Parsers/ASTFunction.h>
 
 namespace DB
 {
@@ -351,6 +353,88 @@ void StorageAzureBlobConfiguration::fromAST(ASTs & engine_args, ContextPtr conte
 
     if (format == "auto")
         format = FormatFactory::instance().getFormatFromFileName(blob_path, true);
+}
+
+void StorageAzureBlobConfiguration::addStructureToArgs(ASTs & args, const String & structure_, ContextPtr context)
+{
+    if (tryGetNamedCollectionWithOverrides(args, context))
+    {
+        /// In case of named collection, just add key-value pair "structure='...'"
+        /// at the end of arguments to override existed structure.
+        ASTs equal_func_args = {std::make_shared<ASTIdentifier>("structure"), std::make_shared<ASTLiteral>(structure_)};
+        auto equal_func = makeASTFunction("equals", std::move(equal_func_args));
+        args.push_back(equal_func);
+    }
+    else
+    {
+        if (args.size() < 3 || args.size() > 8)
+        {
+            throw Exception(ErrorCodes::NUMBER_OF_ARGUMENTS_DOESNT_MATCH,
+                            "Storage Azure requires 3 to 7 arguments: "
+                            "StorageObjectStorage(connection_string|storage_account_url, container_name, blobpath, [account_name, account_key, format, compression, structure])");
+        }
+
+        auto structure_literal = std::make_shared<ASTLiteral>(structure_);
+
+        auto is_format_arg
+            = [](const std::string & s) -> bool { return s == "auto" || FormatFactory::instance().getAllFormats().contains(s); };
+
+
+        if (args.size() == 3)
+        {
+            /// Add format=auto & compression=auto before structure argument.
+            args.push_back(std::make_shared<ASTLiteral>("auto"));
+            args.push_back(std::make_shared<ASTLiteral>("auto"));
+            args.push_back(structure_literal);
+        }
+        else if (args.size() == 4)
+        {
+            auto fourth_arg = checkAndGetLiteralArgument<String>(args[3], "format/account_name/structure");
+            if (is_format_arg(fourth_arg))
+            {
+                /// Add compression=auto before structure argument.
+                args.push_back(std::make_shared<ASTLiteral>("auto"));
+                args.push_back(structure_literal);
+            }
+            else
+            {
+                args.back() = structure_literal;
+            }
+        }
+        else if (args.size() == 5)
+        {
+            auto fourth_arg = checkAndGetLiteralArgument<String>(args[3], "format/account_name");
+            if (!is_format_arg(fourth_arg))
+            {
+                /// Add format=auto & compression=auto before structure argument.
+                args.push_back(std::make_shared<ASTLiteral>("auto"));
+                args.push_back(std::make_shared<ASTLiteral>("auto"));
+            }
+            args.push_back(structure_literal);
+        }
+        else if (args.size() == 6)
+        {
+            auto fourth_arg = checkAndGetLiteralArgument<String>(args[3], "format/account_name");
+            if (!is_format_arg(fourth_arg))
+            {
+                /// Add compression=auto before structure argument.
+                args.push_back(std::make_shared<ASTLiteral>("auto"));
+                args.push_back(structure_literal);
+            }
+            else
+            {
+                args.back() = structure_literal;
+            }
+        }
+        else if (args.size() == 7)
+        {
+            args.push_back(structure_literal);
+        }
+        else if (args.size() == 8)
+        {
+            args.back() = structure_literal;
+        }
+    }
 }
 
 }

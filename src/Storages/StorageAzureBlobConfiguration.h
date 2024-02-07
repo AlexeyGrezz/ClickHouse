@@ -20,6 +20,7 @@ public:
 
     void fromNamedCollection(const NamedCollection & collection) override;
     void fromAST(ASTs & args, ContextPtr context, bool with_structure) override;
+    static void addStructureToArgs(ASTs & args, const String & structure, ContextPtr context);
 
 private:
     using AzureClient = Azure::Storage::Blobs::BlobContainerClient;

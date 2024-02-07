@@ -16,11 +16,12 @@ public:
     String getNamespace() const override { return url.bucket; }
     String getDataSourceDescription() override;
 
-    void fromNamedCollection(const NamedCollection & collection) override;
-    void fromAST(ASTs & args, ContextPtr context, bool with_structure) override;
-
     void check(ContextPtr context) const override;
     ObjectStoragePtr createOrUpdateObjectStorage(ContextPtr context, bool is_readonly = true) override; /// NOLINT
+
+    void fromNamedCollection(const NamedCollection & collection) override;
+    void fromAST(ASTs & args, ContextPtr context, bool with_structure) override;
+    static void addStructureToArgs(ASTs & args, const String & structure, ContextPtr context);
 
 private:
     S3::URI url;

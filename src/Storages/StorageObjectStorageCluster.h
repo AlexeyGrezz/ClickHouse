@@ -2,21 +2,21 @@
 
 #include "config.h"
 
-#if USE_AZURE_BLOB_STORAGE
 #include <Interpreters/Cluster.h>
 #include <Storages/IStorageCluster.h>
 #include <Storages/StorageObjectStorage.h>
+#include <TableFunctions/TableFunctionObjectStorageCluster.h>
 
 namespace DB
 {
 
 class Context;
 
-template <typename StorageSettings>
-class StorageAzureBlobCluster : public IStorageCluster
+template <typename Definition, typename StorageSettings, typename Configuration>
+class StorageObjectStorageCluster : public IStorageCluster
 {
 public:
-    StorageAzureBlobCluster(
+    StorageObjectStorageCluster(
         const String & cluster_name_,
         const StorageObjectStorageConfigurationPtr & configuration_,
         ObjectStoragePtr object_storage_,
@@ -55,6 +55,11 @@ private:
 };
 
 
-}
-
+#if USE_AWS_S3
+using StorageS3Cluster = StorageObjectStorageCluster<S3ClusterDefinition, S3StorageSettings, StorageS3Configuration>;
 #endif
+#if USE_AZURE_BLOB_STORAGE
+using StorageAzureBlobCluster = StorageObjectStorageCluster<AzureClusterDefinition, AzureStorageSettings, StorageAzureBlobConfiguration>;
+#endif
+
+}
