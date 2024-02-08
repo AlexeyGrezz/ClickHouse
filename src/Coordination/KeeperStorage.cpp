@@ -252,7 +252,7 @@ void KeeperStorage::Node::copyStats(const Coordination::Stat & stat)
     if (stat.ephemeralOwner == 0)
     {
         is_ephemeral_and_mtime.is_ephemeral = false;
-        ephemeral_or_children_data.children_info.num_children = stat.numChildren;
+        setNumChildren(stat.numChildren);
     }
     else
     {
@@ -269,10 +269,9 @@ void KeeperStorage::Node::setResponseStat(Coordination::Stat & response_stat) co
     response_stat.version = version;
     response_stat.cversion = cversion;
     response_stat.aversion = aversion;
-    bool is_ephemeral = isEphemeral();
-    response_stat.ephemeralOwner = is_ephemeral ? ephemeral_or_children_data.ephemeral_owner : 0;
+    response_stat.ephemeralOwner = ephemeralOwner();
     response_stat.dataLength = static_cast<int32_t>(data_size);
-    response_stat.numChildren = is_ephemeral ? 0 : numChildren();
+    response_stat.numChildren = numChildren();
     response_stat.pzxid = pzxid;
 
 }
@@ -1316,7 +1315,7 @@ struct KeeperStorageRemoveRequestProcessor final : public KeeperStorageRequestPr
             KeeperStorage::UpdateNodeDelta{[](KeeperStorage::Node & parent)
                                            {
                                                ++parent.cversion;
-                                               --parent.ephemeral_or_children_data.children_info.num_children;
+                                               parent.decreaseNumChildren();
                                            }});
 
         new_deltas.emplace_back(request.path, zxid, KeeperStorage::RemoveNodeDelta{request.version, node->ephemeralOwner()});
@@ -2294,7 +2293,7 @@ void KeeperStorage::preprocessRequest(
                         [ephemeral_path](Node & parent)
                         {
                             ++parent.cversion;
-                            --parent.ephemeral_or_children_data.children_info.num_children;
+                            parent.decreaseNumChildren();
                         }
                     }
                 );
