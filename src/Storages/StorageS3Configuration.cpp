@@ -51,6 +51,19 @@ void StorageS3Configuration::check(ContextPtr context) const
     context->getGlobalContext()->getHTTPHeaderFilter().checkHeaders(headers_from_ast);
 }
 
+StorageObjectStorageConfigurationPtr StorageS3Configuration::clone()
+{
+    auto configuration = std::make_shared<StorageS3Configuration>();
+    configuration->url = url;
+    configuration->auth_settings = auth_settings;
+    configuration->request_settings = request_settings;
+    configuration->static_configuration = static_configuration;
+    configuration->headers_from_ast = headers_from_ast;
+    configuration->keys = keys;
+    configuration->initialized = initialized;
+    return configuration;
+}
+
 ObjectStoragePtr StorageS3Configuration::createOrUpdateObjectStorage(ContextPtr context, bool /* is_readonly */) /// NOLINT
 {
     auto s3_settings = context->getStorageS3Settings().getSettings(url.uri.toString());

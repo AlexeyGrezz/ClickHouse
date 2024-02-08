@@ -96,6 +96,8 @@ public:
 
     virtual void parseArgumentsImpl(ASTs & args, const ContextPtr & context);
 
+    static void addColumnsStructureToArguments(ASTs & args, const String & structure, const ContextPtr & context);
+
 protected:
     StoragePtr executeImpl(
         const ASTPtr & ast_function,

@@ -11,7 +11,6 @@
 #include <Storages/StorageDictionary.h>
 #include <Storages/extractTableFunctionArgumentsFromSelectQuery.h>
 #include <Storages/VirtualColumnUtils.h>
-#include <Storages/StorageAzureBlobConfiguration.h>
 #include <Common/Exception.h>
 #include <Parsers/queryToString.h>
 
@@ -72,10 +71,11 @@ void StorageObjectStorageCluster<Definition, StorageSettings, Configuration>::ad
     if (!expression_list)
     {
         throw Exception(ErrorCodes::LOGICAL_ERROR,
-                        "Expected SELECT query from table function s3Cluster, got '{}'",
-                        queryToString(query));
+                        "Expected SELECT query from table function {}, got '{}'",
+                        engine_name, queryToString(query));
     }
-    Configuration::addStructureToArgs(expression_list->children, structure, context);
+    using TableFunction = TableFunctionObjectStorageCluster<Definition, StorageSettings, Configuration>;
+    TableFunction::addColumnsStructureToArguments(expression_list->children, structure, context);
 }
 
 template <typename Definition, typename StorageSettings, typename Configuration>

@@ -5,6 +5,9 @@
 namespace DB
 {
 
+class StorageObjectStorageConfiguration;
+using StorageObjectStorageConfigurationPtr = std::shared_ptr<StorageObjectStorageConfiguration>;
+
 class StorageObjectStorageConfiguration
 {
 public:
@@ -30,6 +33,8 @@ public:
     }
 
     virtual void check(ContextPtr context) const = 0;
+    virtual StorageObjectStorageConfigurationPtr clone() = 0;
+
     virtual ObjectStoragePtr createOrUpdateObjectStorage(ContextPtr context, bool is_readonly = true) = 0; /// NOLINT
 
     virtual void fromNamedCollection(const NamedCollection & collection) = 0;

@@ -61,6 +61,12 @@ std::vector<size_t> TableFunctionObjectStorage<Definition, StorageSettings, Conf
 }
 
 template <typename Definition, typename StorageSettings, typename Configuration>
+void TableFunctionObjectStorage<Definition, StorageSettings, Configuration>::addColumnsStructureToArguments(ASTs & args, const String & structure, const ContextPtr & context)
+{
+    Configuration::addStructureToArgs(args, structure, context);
+}
+
+template <typename Definition, typename StorageSettings, typename Configuration>
 void TableFunctionObjectStorage<Definition, StorageSettings, Configuration>::parseArgumentsImpl(ASTs & engine_args, const ContextPtr & local_context)
 {
     configuration = std::make_shared<Configuration>();

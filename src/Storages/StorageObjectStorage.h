@@ -32,8 +32,8 @@ public:
         const ConstraintsDescription & constraints_,
         const String & comment,
         std::optional<FormatSettings> format_settings_,
-        bool distributed_processing_,
-        ASTPtr partition_by_);
+        bool distributed_processing_ = false,
+        ASTPtr partition_by_ = nullptr);
 
     String getName() const override { return engine_name; }
 
@@ -83,7 +83,9 @@ public:
         const std::optional<FormatSettings> & format_settings,
         ContextPtr context);
 
-private:
+protected:
+    virtual std::pair<ConfigurationPtr, ObjectStoragePtr> updateConfigurationAndGetCopy(ContextPtr local_context);
+
     const std::string engine_name;
     const NamesAndTypesList virtual_columns;
     std::optional<FormatSettings> format_settings;
@@ -93,8 +95,6 @@ private:
     ObjectStoragePtr object_storage;
     ConfigurationPtr configuration;
     std::mutex configuration_update_mutex;
-
-    std::pair<ConfigurationPtr, ObjectStoragePtr> updateConfigurationAndGetCopy(ContextPtr local_context);
 };
 
 template <typename StorageSettings>
@@ -146,7 +146,7 @@ public:
 
 private:
     void addNumRowsToCache(const String & path, size_t num_rows);
-    std::optional<size_t> tryGetNumRowsFromCache(const RelativePathWithMetadata & path_with_metadata);
+    std::optional<size_t> tryGetNumRowsFromCache(RelativePathWithMetadata & path_with_metadata);
 
     const String name;
     ObjectStoragePtr object_storage;

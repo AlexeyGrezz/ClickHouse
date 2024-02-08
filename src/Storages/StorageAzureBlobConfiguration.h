@@ -16,6 +16,7 @@ public:
     String getNamespace() const override { return container; }
 
     void check(ContextPtr context) const override;
+    StorageObjectStorageConfigurationPtr clone() override;
     ObjectStoragePtr createOrUpdateObjectStorage(ContextPtr context, bool is_readonly = true) override; /// NOLINT
 
     void fromNamedCollection(const NamedCollection & collection) override;

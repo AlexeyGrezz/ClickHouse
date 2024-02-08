@@ -3,7 +3,6 @@
 #include <TableFunctions/TableFunctionFactory.h>
 #include <TableFunctions/TableFunctionObjectStorageCluster.h>
 #include <TableFunctions/registerTableFunctions.h>
-
 #include <Interpreters/parseColumnsListForTableFunction.h>
 #include <Storages/StorageObjectStorage.h>
 #include <Storages/StorageObjectStorageCluster.h>

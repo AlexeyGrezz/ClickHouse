@@ -17,6 +17,8 @@ public:
     String getDataSourceDescription() override;
 
     void check(ContextPtr context) const override;
+    StorageObjectStorageConfigurationPtr clone() override;
+
     ObjectStoragePtr createOrUpdateObjectStorage(ContextPtr context, bool is_readonly = true) override; /// NOLINT
 
     void fromNamedCollection(const NamedCollection & collection) override;

@@ -193,8 +193,11 @@ public:
         const auto path = blob_path.empty() ? configuration->getPaths().back() : blob_path;
         const auto chosen_compression_method = chooseCompressionMethod(path, configuration->compression_method);
 
+        auto buffer = object_storage->writeObject(
+            StoredObject(path), WriteMode::Rewrite, std::nullopt, DBMS_DEFAULT_BUFFER_SIZE, context->getWriteSettings());
+
         write_buf = wrapWriteBufferWithCompressionMethod(
-                        object_storage->writeObject(StoredObject(path), WriteMode::Rewrite),
+                        std::move(buffer),
                         chosen_compression_method,
                         static_cast<int>(settings.output_format_compression_level),
                         static_cast<int>(settings.output_format_compression_zstd_window_log));
@@ -787,17 +790,21 @@ void StorageObjectStorageSource<StorageSettings>::addNumRowsToCache(const String
     Storage::getSchemaCache(getContext()).addNumRows(cache_key, num_rows);
 }
 
-template <typename StorageSettings> std::optional<size_t>
-StorageObjectStorageSource<StorageSettings>::tryGetNumRowsFromCache(const DB::RelativePathWithMetadata & path_with_metadata)
+template <typename StorageSettings>
+std::optional<size_t> StorageObjectStorageSource<StorageSettings>::tryGetNumRowsFromCache(DB::RelativePathWithMetadata & path_with_metadata)
 {
     String source = fs::path(configuration->getDataSourceDescription()) / path_with_metadata.relative_path;
     auto cache_key = getKeyForSchemaCache(source, configuration->format, format_settings, getContext());
     auto get_last_mod_time = [&]() -> std::optional<time_t>
     {
-        auto last_mod = path_with_metadata.metadata.last_modified;
-        if (last_mod)
-            return last_mod->epochTime();
-        return std::nullopt;
+        // auto last_mod = path_with_metadata.metadata.last_modified;
+        // if (last_mod)
+        //     return last_mod->epochTime();
+        // else
+        {
+            path_with_metadata.metadata = object_storage->getObjectMetadata(path_with_metadata.relative_path);
+            return path_with_metadata.metadata.last_modified->epochMicroseconds();
+        }
     };
     return Storage::getSchemaCache(getContext()).tryGetNumRows(cache_key, get_last_mod_time);
 }
@@ -933,27 +940,27 @@ std::unique_ptr<ReadBuffer> StorageObjectStorageSource<StorageSettings>::createR
     read_settings.enable_filesystem_cache = false;
     read_settings.remote_read_min_bytes_for_seek = read_settings.remote_fs_buffer_size;
 
-    auto download_buffer_size = getContext()->getSettings().max_download_buffer_size;
-    const bool object_too_small = object_size <= 2 * download_buffer_size;
+    // auto download_buffer_size = getContext()->getSettings().max_download_buffer_size;
+    // const bool object_too_small = object_size <= 2 * download_buffer_size;
 
     // Create a read buffer that will prefetch the first ~1 MB of the file.
     // When reading lots of tiny files, this prefetching almost doubles the throughput.
     // For bigger files, parallel reading is more useful.
-    if (object_too_small && read_settings.remote_fs_method == RemoteFSReadMethod::threadpool)
-    {
-        LOG_TRACE(log, "Downloading object of size {} with initial prefetch", object_size);
+    // if (object_too_small && read_settings.remote_fs_method == RemoteFSReadMethod::threadpool)
+    // {
+    //     LOG_TRACE(log, "Downloading object of size {} with initial prefetch", object_size);
 
-        auto async_reader = object_storage->readObjects(
-            StoredObjects{StoredObject{key, /* local_path */ "", object_size}}, read_settings);
+    //     auto async_reader = object_storage->readObjects(
+    //         StoredObjects{StoredObject{key, /* local_path */ "", object_size}}, read_settings);
 
-        async_reader->setReadUntilEnd();
-        if (read_settings.remote_fs_prefetch)
-            async_reader->prefetch(DEFAULT_PREFETCH_PRIORITY);
+    //     async_reader->setReadUntilEnd();
+    //     if (read_settings.remote_fs_prefetch)
+    //         async_reader->prefetch(DEFAULT_PREFETCH_PRIORITY);
 
-        return async_reader;
-    }
-    else
-        return object_storage->readObject(StoredObject(key), read_settings, {}, object_size);
+    //     return async_reader;
+    // }
+    // else
+    return object_storage->readObject(StoredObject(key), read_settings);
 }
 
 namespace
@@ -971,7 +978,7 @@ public:
         Storage::ConfigurationPtr configuration_,
         const FileIterator & file_iterator_,
         const std::optional<FormatSettings> & format_settings_,
-        const RelativePathsWithMetadata & read_keys_,
+        RelativePathsWithMetadata & read_keys_,
         const ContextPtr & context_)
         : WithContext(context_)
         , object_storage(object_storage_)
@@ -1095,8 +1102,8 @@ private:
     }
 
     std::optional<ColumnsDescription> tryGetColumnsFromCache(
-        const RelativePathsWithMetadata::const_iterator & begin,
-        const RelativePathsWithMetadata::const_iterator & end)
+        const RelativePathsWithMetadata::iterator & begin,
+        const RelativePathsWithMetadata::iterator & end)
     {
         if (!storage_settings.schema_inference_use_cache)
             return std::nullopt;
@@ -1107,10 +1114,12 @@ private:
             auto get_last_mod_time = [&] -> std::optional<time_t>
             {
                 if (it->metadata.last_modified)
-                    return it->metadata.last_modified->epochTime();
-                // else if (auto metadata = object_storage->tryGetObjectMetadata(it->relative_path))
-                //     it->metadata = metadata.value(); FIXME
-                return std::nullopt;
+                    return it->metadata.last_modified->epochMicroseconds();
+                else
+                {
+                    it->metadata = object_storage->getObjectMetadata(it->relative_path);
+                    return it->metadata.last_modified->epochMicroseconds();
+                }
             };
 
             auto cache_key = getKeyForSchemaCache(it->relative_path);
@@ -1127,7 +1136,7 @@ private:
     const FileIterator file_iterator;
     const std::optional<FormatSettings> & format_settings;
     const StorageObjectStorageSettings storage_settings;
-    const RelativePathsWithMetadata & read_keys;
+    RelativePathsWithMetadata & read_keys;
 
     size_t prev_read_keys_size;
     RelativePathWithMetadata current_path_with_metadata;

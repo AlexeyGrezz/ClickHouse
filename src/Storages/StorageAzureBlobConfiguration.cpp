@@ -76,6 +76,19 @@ void StorageAzureBlobConfiguration::check(ContextPtr context) const
     context->getGlobalContext()->getRemoteHostFilter().checkURL(url_to_check);
 }
 
+StorageObjectStorageConfigurationPtr StorageAzureBlobConfiguration::clone()
+{
+    auto configuration = std::make_shared<StorageAzureBlobConfiguration>();
+    configuration->connection_url = connection_url;
+    configuration->is_connection_string = is_connection_string;
+    configuration->account_name = account_name;
+    configuration->account_key = account_key;
+    configuration->container = container;
+    configuration->blob_path = blob_path;
+    configuration->blobs_paths = blobs_paths;
+    return configuration;
+}
+
 AzureObjectStorage::SettingsPtr StorageAzureBlobConfiguration::createSettings(ContextPtr context)
 {
     const auto & context_settings = context->getSettingsRef();
@@ -321,7 +334,7 @@ void StorageAzureBlobConfiguration::fromAST(ASTs & engine_args, ContextPtr conte
     else if (engine_args.size() == 7)
     {
         auto fourth_arg = checkAndGetLiteralArgument<String>(engine_args[3], "format/account_name");
-        if (with_structure && is_format_arg(fourth_arg))
+        if (!with_structure && is_format_arg(fourth_arg))
         {
             throw Exception(ErrorCodes::BAD_ARGUMENTS, "Format and compression must be last arguments");
         }
@@ -375,10 +388,8 @@ void StorageAzureBlobConfiguration::addStructureToArgs(ASTs & args, const String
         }
 
         auto structure_literal = std::make_shared<ASTLiteral>(structure_);
-
         auto is_format_arg
             = [](const std::string & s) -> bool { return s == "auto" || FormatFactory::instance().getAllFormats().contains(s); };
-
 
         if (args.size() == 3)
         {

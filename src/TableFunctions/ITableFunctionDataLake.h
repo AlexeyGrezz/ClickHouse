@@ -10,6 +10,9 @@
 #    include <Interpreters/parseColumnsListForTableFunction.h>
 #    include <Storages/IStorage.h>
 #    include <TableFunctions/ITableFunction.h>
+#include <Storages/StorageObjectStorageConfiguration.h>
+#include <Storages/StorageObjectStorage.h>
+#include <Storages/DataLakes/Iceberg/StorageIceberg.h>
 
 namespace DB
 {
@@ -33,9 +36,10 @@ protected:
         if (TableFunction::configuration->structure != "auto")
             columns = parseColumnsListFromString(TableFunction::configuration->structure, context);
 
-        StoragePtr storage = Storage::create(
-            *TableFunction::configuration, context, false, StorageID(TableFunction::getDatabaseName(), table_name),
-            columns, ConstraintsDescription{}, String{}, std::nullopt);
+        StorageObjectStorageConfigurationPtr configuration = TableFunction::configuration;
+        StoragePtr storage = StorageIceberg<StorageObjectStorage<StorageS3Settings>>::create(
+            configuration, context, "", StorageID(TableFunction::getDatabaseName(), table_name),
+            columns, ConstraintsDescription{}, String{}, std::nullopt, false);
 
         storage->startup();
         return storage;
@@ -48,7 +52,7 @@ protected:
         if (TableFunction::configuration->structure == "auto")
         {
             context->checkAccess(TableFunction::getSourceAccessType());
-            return Storage::getTableStructureFromData(*TableFunction::configuration, std::nullopt, context);
+            return Storage::getTableStructureFromData(TableFunction::object_storage, TableFunction::configuration, std::nullopt, context);
         }
 
         return parseColumnsListFromString(TableFunction::configuration->structure, context);
